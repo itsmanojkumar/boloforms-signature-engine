@@ -43,7 +43,12 @@ export default function Home() {
         if (!mounted) return;
         
         if (pdfBytes && pdfBytes instanceof Uint8Array) {
-          const blob = new Blob([pdfBytes], { type: "application/pdf" });
+          // Use the exact ArrayBuffer slice that backs this Uint8Array
+          const arrayBuffer = pdfBytes.buffer.slice(
+            pdfBytes.byteOffset,
+            pdfBytes.byteOffset + pdfBytes.byteLength
+          ) as ArrayBuffer;
+          const blob = new Blob([arrayBuffer], { type: "application/pdf" });
           const blobUrl = URL.createObjectURL(blob);
           pdfBlobUrlRef.current = blobUrl;
           setPdfFile(blobUrl);
@@ -325,7 +330,12 @@ export default function Home() {
       // No calibration offset - use exact coordinates
       const modifiedPdfBytes = await injectFieldsToPDF(pdfBytes, pdfFields, 0, 0);
 
-      const blob = new Blob([modifiedPdfBytes], { type: "application/pdf" });
+      // Convert Uint8Array to ArrayBuffer for Blob constructor
+      const pdfArrayBuffer = modifiedPdfBytes.buffer.slice(
+        modifiedPdfBytes.byteOffset,
+        modifiedPdfBytes.byteOffset + modifiedPdfBytes.byteLength
+      ) as ArrayBuffer;
+      const blob = new Blob([pdfArrayBuffer], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;

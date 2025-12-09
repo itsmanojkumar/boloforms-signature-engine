@@ -70,7 +70,7 @@ export default function CanvasPDFViewer({
         console.log("[CanvasPDFViewer] Loading document...", file instanceof Uint8Array ? "Uint8Array" : file);
         const loadingTask = pdfjsLib.getDocument(file);
         
-        loadingTask.onProgress = (p) => {
+        loadingTask.onProgress = (p: any) => {
           // Optional: handle progress
         };
 
