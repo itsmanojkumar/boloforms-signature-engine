@@ -62,10 +62,14 @@ export function cssToPdf(
   
   // Y conversion: Invert from top-left to bottom-left
   // Step 1: Convert CSS top edge to PDF points (distance from top of PDF)
+  // The distance from the top of the viewport corresponds to the distance from the top of the PDF.
   const pdfTopEdge = cssY / scale;
+  
   // Step 2: Calculate bottom edge position in PDF coordinates (distance from bottom of PDF)
   // pdfY is the coordinate of the BOTTOM-LEFT corner of the field
   // pdfY = totalHeight - (distanceFromTop + height)
+  // This is correct. If a field is 30 units high and 100 units from top on a 842 unit page:
+  // pdfY = 842 - (100 + 30) = 712.
   const pdfY = pdfHeightValue - (pdfTopEdge + pdfHeight);
 
   // VERIFICATION: Calculate back to verify correctness

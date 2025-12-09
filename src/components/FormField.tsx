@@ -71,12 +71,33 @@ export default function FormField({
     });
   };
 
+  const handleTouchStart = (e: React.TouchEvent) => {
+    e.stopPropagation();
+    onSelect(field.id);
+    setIsDragging(true);
+    setDragStart({
+      x: e.touches[0].clientX - field.cssX,
+      y: e.touches[0].clientY - field.cssY,
+    });
+  };
+
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsResizing(true);
     setResizeStart({
       x: e.clientX,
       y: e.clientY,
+      width: field.cssWidth,
+      height: field.cssHeight,
+    });
+  };
+
+  const handleResizeTouchStart = (e: React.TouchEvent) => {
+    e.stopPropagation();
+    setIsResizing(true);
+    setResizeStart({
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY,
       width: field.cssWidth,
       height: field.cssHeight,
     });
@@ -103,7 +124,36 @@ export default function FormField({
       }
     };
 
+    const handleTouchMove = (e: TouchEvent) => {
+      if (isDragging) {
+        // Prevent scrolling while dragging
+        if (e.cancelable) e.preventDefault();
+        const newX = e.touches[0].clientX - dragStart.x;
+        const newY = e.touches[0].clientY - dragStart.y;
+        onUpdate({
+          ...field,
+          cssX: Math.max(0, newX),
+          cssY: Math.max(0, newY),
+        });
+      } else if (isResizing) {
+        // Prevent scrolling while resizing
+        if (e.cancelable) e.preventDefault();
+        const deltaX = e.touches[0].clientX - resizeStart.x;
+        const deltaY = e.touches[0].clientY - resizeStart.y;
+        onUpdate({
+          ...field,
+          cssWidth: Math.max(50, resizeStart.width + deltaX),
+          cssHeight: Math.max(30, resizeStart.height + deltaY),
+        });
+      }
+    };
+
     const handleMouseUp = () => {
+      setIsDragging(false);
+      setIsResizing(false);
+    };
+
+    const handleTouchEnd = () => {
       setIsDragging(false);
       setIsResizing(false);
     };
@@ -111,9 +161,13 @@ export default function FormField({
     if (isDragging || isResizing) {
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
+      document.addEventListener("touchmove", handleTouchMove, { passive: false });
+      document.addEventListener("touchend", handleTouchEnd);
       return () => {
         document.removeEventListener("mousemove", handleMouseMove);
         document.removeEventListener("mouseup", handleMouseUp);
+        document.removeEventListener("touchmove", handleTouchMove);
+        document.removeEventListener("touchend", handleTouchEnd);
       };
     }
   }, [isDragging, isResizing, dragStart, resizeStart, field, onUpdate]);
@@ -159,6 +213,7 @@ export default function FormField({
             placeholder="Enter text"
             className="w-full h-full px-2 py-1 border-none outline-none bg-transparent text-sm"
             onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()} // Allow focusing input
           />
         );
       case "date":
@@ -169,6 +224,7 @@ export default function FormField({
             onChange={(e) => handleInputChange(e.target.value)}
             className="w-full h-full px-2 py-1 border-none outline-none bg-transparent text-sm"
             onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
           />
         );
       case "radio":
@@ -179,6 +235,7 @@ export default function FormField({
               name={field.id}
               className="mr-2"
               onClick={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
             />
             <span className="text-sm">{field.label || "Option"}</span>
           </div>
@@ -201,6 +258,7 @@ export default function FormField({
                   onChange={handleImageUpload}
                   className="hidden"
                   onClick={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
                 />
               </label>
             )}
@@ -217,12 +275,14 @@ export default function FormField({
             <div className="flex gap-2 p-1 bg-white">
               <button
                 onClick={handleSignatureSave}
+                onTouchStart={(e) => { e.stopPropagation(); handleSignatureSave(); }}
                 className="px-2 py-1 text-xs bg-blue-500 text-white rounded"
               >
                 Save
               </button>
               <button
                 onClick={handleSignatureClear}
+                onTouchStart={(e) => { e.stopPropagation(); handleSignatureClear(); }}
                 className="px-2 py-1 text-xs bg-gray-500 text-white rounded"
               >
                 Clear
@@ -239,7 +299,7 @@ export default function FormField({
     <div
       className={`absolute border-2 transition-all ${
         isSelected ? "border-blue-500 shadow-md bg-blue-50" : "border-gray-400 bg-white hover:border-blue-300"
-      } cursor-move`}
+      } cursor-move touch-none`}
       style={{
         left: `${field.cssX}px`,
         top: `${field.cssY}px`,
@@ -247,8 +307,10 @@ export default function FormField({
         height: `${field.cssHeight}px`,
         minWidth: "50px",
         minHeight: "30px",
+        touchAction: "none"
       }}
       onMouseDown={handleMouseDown}
+      onTouchStart={handleTouchStart}
       title={`PDF: (${field.x.toFixed(1)}, ${field.y.toFixed(1)}) CSS: (${field.cssX.toFixed(1)}, ${field.cssY.toFixed(1)})`}
     >
       {renderFieldContent()}
@@ -259,13 +321,18 @@ export default function FormField({
               e.stopPropagation();
               onDelete(field.id);
             }}
-            className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600 shadow"
+            onTouchStart={(e) => {
+              e.stopPropagation();
+              onDelete(field.id);
+            }}
+            className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600 shadow z-50"
           >
             ×
           </button>
           <div
-            className="absolute bottom-0 right-0 w-4 h-4 bg-blue-500 cursor-se-resize hover:bg-blue-600 rounded-tl shadow-md transition-colors"
+            className="absolute bottom-0 right-0 w-6 h-6 bg-blue-500 cursor-se-resize hover:bg-blue-600 rounded-tl shadow-md transition-colors z-50"
             onMouseDown={handleResizeMouseDown}
+            onTouchStart={handleResizeTouchStart}
             title="Drag to resize"
           />
         </>
@@ -273,4 +340,3 @@ export default function FormField({
     </div>
   );
 }
-

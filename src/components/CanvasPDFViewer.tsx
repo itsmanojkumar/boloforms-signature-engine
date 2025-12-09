@@ -41,6 +41,9 @@ export default function CanvasPDFViewer({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // Track PDF doc and page for resize handling
+  const pdfPageRef = useRef<any>(null);
 
   // Load and Render PDF
   useEffect(() => {
@@ -82,59 +85,11 @@ export default function CanvasPDFViewer({
 
         // 2. Get the first page
         const page = await pdfDocument.getPage(1);
+        pdfPageRef.current = page;
         console.log("[CanvasPDFViewer] Page 1 loaded");
 
-        // 3. Calculate scale to fit container
-        const containerWidth = containerRef.current.clientWidth;
-        if (containerWidth === 0) {
-           console.warn("[CanvasPDFViewer] Container width is 0, waiting...");
-           // This might happen if container is hidden or not laid out yet
-           // The setTimeout retry in the useEffect should handle this
-           throw new Error("Container width is 0");
-        }
-
-        // Get unscaled viewport to know original dimensions
-        const unscaledViewport = page.getViewport({ scale: 1 });
-        const scale = containerWidth / unscaledViewport.width;
-        
-        console.log("[CanvasPDFViewer] Calculated scale:", { 
-          containerWidth, 
-          originalWidth: unscaledViewport.width, 
-          scale 
-        });
-
-        const viewport = page.getViewport({ scale });
-
-        // 4. Update parent with viewport info
-        if (onViewportChange) {
-            onViewportChange({
-              width: viewport.width,
-              height: viewport.height,
-              scale: scale,
-              pdfWidth: unscaledViewport.width,
-              pdfHeight: unscaledViewport.height,
-            });
-        }
-
-        // 5. Prepare canvas
-        const canvas = canvasRef.current;
-        if (!canvas) throw new Error("Canvas element not found");
-        const context = canvas.getContext("2d");
-        if (!context) throw new Error("Could not get canvas context");
-
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
-
-        // 6. Render
-        console.log("[CanvasPDFViewer] Starting page render to canvas");
-        const renderContext = {
-          canvasContext: context,
-          viewport: viewport,
-        };
-        
-        renderTask = page.render(renderContext);
-        await renderTask.promise;
-        console.log("[CanvasPDFViewer] Render complete");
+        // 3. Render page
+        await renderPage(page);
 
         setLoading(false);
       } catch (err: any) {
@@ -152,12 +107,93 @@ export default function CanvasPDFViewer({
       }
     };
 
+    const renderPage = async (page: any) => {
+        if (!containerRef.current || !canvasRef.current) return;
+
+        // Calculate scale to fit container
+        const containerWidth = containerRef.current.clientWidth;
+        if (containerWidth === 0) {
+           console.warn("[CanvasPDFViewer] Container width is 0, waiting...");
+           // Retry soon
+           setTimeout(() => renderPage(page), 100);
+           return;
+        }
+
+        // Get unscaled viewport to know original dimensions
+        const unscaledViewport = page.getViewport({ scale: 1 });
+        const scale = containerWidth / unscaledViewport.width;
+        
+        console.log("[CanvasPDFViewer] Calculated scale:", { 
+          containerWidth, 
+          originalWidth: unscaledViewport.width, 
+          scale 
+        });
+
+        const viewport = page.getViewport({ scale });
+
+        // Update parent with viewport info
+        if (onViewportChange) {
+            onViewportChange({
+              width: viewport.width,
+              height: viewport.height,
+              scale: scale,
+              pdfWidth: unscaledViewport.width,
+              pdfHeight: unscaledViewport.height,
+            });
+        }
+
+        // Prepare canvas
+        const canvas = canvasRef.current;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Could not get canvas context");
+
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        // Render
+        if (renderTask) {
+            renderTask.cancel();
+        }
+
+        console.log("[CanvasPDFViewer] Starting page render to canvas");
+        const renderContext = {
+          canvasContext: context,
+          viewport: viewport,
+        };
+        
+        renderTask = page.render(renderContext);
+        await renderTask.promise;
+        console.log("[CanvasPDFViewer] Render complete");
+    };
+
     // Use a small timeout to ensure container has width
     const timeoutId = setTimeout(render, 100);
+
+    // Resize Observer
+    const resizeObserver = new ResizeObserver(() => {
+        if (pdfPageRef.current) {
+            // Only re-render if width actually changed (avoid loops)
+            const currentWidth = containerRef.current?.clientWidth;
+            if (currentWidth && Math.abs(currentWidth - (canvasRef.current?.width || 0)) > 5) {
+                console.log("[CanvasPDFViewer] Resize detected, re-rendering...");
+                renderPage(pdfPageRef.current).catch(err => {
+                    // Ignore cancellation errors during resize
+                    if (err.name !== "RenderingCancelledException") {
+                        console.error("Resize render error:", err);
+                    }
+                });
+            }
+        }
+    });
+
+    if (containerRef.current) {
+        resizeObserver.observe(containerRef.current);
+    }
 
     return () => {
       isMounted = false;
       clearTimeout(timeoutId);
+      resizeObserver.disconnect();
       if (renderTask) {
         console.log("[CanvasPDFViewer] Cancelling render task");
         renderTask.cancel();

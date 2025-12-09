@@ -7,41 +7,44 @@ The **Signature Injection Engine** is a responsive form field placement tool tha
 ## 🏗️ Architecture
 
 ### Frontend (React/Next.js)
-- **PDF Viewer**: Renders PDFs using `react-pdf` with automatic fallback to native iframe
-- **Coordinate Conversion**: Translates between CSS pixels (browser) and PDF points (PDF standard)
-- **Drag & Drop Interface**: Intuitive field placement with visual feedback
-- **Responsive Scaling**: Automatically adjusts field positions when viewport changes
+- **PDF Rendering**: Custom `CanvasPDFViewer` using `pdf.js` (direct canvas rendering) for pixel-perfect control.
+- **Coordinate Conversion**: Translates between CSS pixels (browser) and PDF points (PDF standard).
+- **Drag & Drop Interface**: Intuitive field placement relative to the canvas.
+- **Responsive Scaling**: Automatically adjusts field positions when viewport changes.
 
 ### Backend (PDF Generation)
-- **Field Injection**: Uses `pdf-lib` to embed form fields into PDFs at exact coordinates
-- **Multiple Field Types**: Text, Date, Signature, Image, Radio buttons
-- **Accurate Positioning**: Maintains coordinate precision across all screen sizes
+- **Field Injection**: Uses `pdf-lib` to embed form fields into PDFs at exact coordinates.
+- **Multiple Field Types**: Text, Date, Signature, Image, Radio buttons.
+- **Accurate Positioning**: Maintains coordinate precision across all screen sizes.
 
 ## 📐 Coordinate System
 
 ### The Problem
-- **Browsers**: Use CSS pixels with origin at **top-left**
-- **PDFs**: Use points (72 DPI) with origin at **bottom-left**
-- **Scaling**: Screen zoom affects browser rendering but PDF is static
+- **Browsers**: Use CSS pixels with origin at **top-left**.
+- **PDFs**: Use points (72 DPI) with origin at **bottom-left**.
+- **Toolbars**: Browser PDF viewers (iframes) often add unpredictable toolbars/margins, causing offsets.
 
-### The Solution
+### The Solution: Direct Canvas Rendering
+By rendering the PDF directly to a `<canvas>` element using `pdf.js`, we eliminate browser-specific rendering quirks (toolbars, margins). The overlay `div` matches the canvas dimensions exactly.
 
 #### CSS → PDF Conversion (`cssToPdf`)
 ```
 PDF X = CSS X / Scale
-PDF Y = PDF Height - (CSS Y + Height) / Scale
+PDF Y = PDF Height - (Distance From Top + Height)
 ```
+Where `Distance From Top = CSS Y / Scale`.
 
 **Example**: A field at CSS (100px, 200px) on an A4 page (595×842) at 0.5 scale:
 ```
 pdfX = 100 / 0.5 = 200 points
-pdfY = 842 - (200 + height) / 0.5
+distanceFromTop = 200 / 0.5 = 400 points
+pdfY = 842 - (400 + height)
 ```
 
 #### PDF → CSS Conversion (`pdfToCss`)
 ```
 CSS X = PDF X × Scale
-CSS Y = (PDF Height × Scale) - (PDF Y + Height) × Scale
+CSS Y = (PDF Height - PDF Y - Height) × Scale
 ```
 
 This ensures fields stay visually aligned when viewport size or zoom level changes.
@@ -76,18 +79,17 @@ This ensures fields stay visually aligned when viewport size or zoom level chang
 
 ## 🔧 Implementation Details
 
-### 1. PDF Viewer Component (`src/components/PDFViewer.tsx`)
+### 1. Canvas PDF Viewer (`src/components/CanvasPDFViewer.tsx`)
 
 **Key Features**:
-- Dynamic import of `react-pdf` to avoid server-side initialization errors
-- Native iframe fallback if `react-pdf` fails to load
-- Automatic page dimension detection
-- Responsive scaling based on container width
+- Direct use of `pdfjs-dist` to render PDF pages to HTML5 Canvas.
+- Exposes exact page dimensions and scale factor to parent.
+- Eliminates `iframe` sandbox restrictions and visual offsets.
+- **Worker Configuration**: Uses strict version matching for `pdf.worker.min.mjs` to prevent runtime errors.
 
 **Error Handling**:
-- Try/catch for module loading failures
-- Graceful fallback to native PDF viewer
-- User-friendly error messages
+- Robust loading states and error boundaries.
+- Retry logic for container width detection.
 
 ### 2. Form Field Component (`src/components/FormField.tsx`)
 
@@ -118,9 +120,9 @@ pdfPos = cssToPdf(cssPos, viewport)
 - `isDragOver`: Boolean for visual drag feedback
 
 **Event Handlers**:
-- `handleDrop`: Create new field at drop location
-- `handleFieldUpdate`: Update field position/size and convert coordinates
-- `handleDownloadPDF`: Fetch current PDF, inject fields, download
+- `handleDrop`: Create new field at drop location relative to **canvas overlay**.
+- `handleFieldUpdate`: Update field position/size and convert coordinates.
+- `handleDownloadPDF`: Fetch current PDF, inject fields using `pdf-lib`.
 
 ### 4. Coordinate Converter (`src/lib/coordinateConverter.ts`)
 
@@ -131,10 +133,9 @@ export function cssToPdf(cssPos: CSSPosition, viewport: ViewportInfo): PDFPositi
 export function pdfToCss(pdfPos: PDFPosition, viewport: ViewportInfo): CSSPosition
 ```
 
-**Error Handling**:
-- Validates all inputs
-- Returns sensible defaults if conversion fails
-- Logs errors to console for debugging
+**Precision**:
+- Uses floating-point math for exact alignment (< 0.01 point error).
+- Explicitly handles Y-axis inversion logic.
 
 ### 5. PDF Field Injection (`src/lib/injectFieldsToPDF.ts`)
 
@@ -144,16 +145,11 @@ export function pdfToCss(pdfPos: PDFPosition, viewport: ViewportInfo): CSSPositi
 - **Image**: Embeds user-uploaded image
 - **Radio**: Draws radio circle on PDF
 
-**Y-Coordinate Adjustment**:
-```typescript
-const pdfY = page.getHeight() - y - height
-```
-This accounts for PDF's bottom-left origin vs. top-left browser origin.
-
 ## 🚀 Running the Application
 
 ### Start Development Server
 ```bash
+npm install
 npm run dev
 # App runs at http://localhost:3000
 ```
@@ -184,10 +180,6 @@ npm start
    - **Image**: Click "Click to upload image" to add an image
 6. **Download**:
    - Click "Download PDF" button to save the PDF with embedded fields
-7. **Responsive Testing**:
-   - Open Chrome DevTools (F12)
-   - Click the device toolbar to switch to mobile view
-   - Verify fields stay aligned with the PDF content
 
 ### For Developers
 
@@ -217,56 +209,25 @@ case "YOUR_TYPE":
   break;
 ```
 
-#### Testing Coordinate Conversion
-
-Add a debug overlay to see PDF coordinates:
-
-```typescript
-// In PDFViewer or FormField
-{process.env.NODE_ENV === "development" && (
-  <div style={{ fontSize: "10px", color: "red" }}>
-    PDF: ({field.x.toFixed(0)}, {field.y.toFixed(0)})
-    CSS: ({field.cssX.toFixed(0)}, {field.cssY.toFixed(0)})
-  </div>
-)}
-```
-
 ## 🐛 Troubleshooting
 
-### PDF Fails to Load
-- Check browser console for errors
-- Verify the PDF file is valid (use native PDF viewer to test)
-- If `react-pdf` fails, native iframe fallback will appear
+### "Object.defineProperty called on non-object"
+- This usually indicates a version mismatch between `pdfjs-dist` and the worker.
+- Ensure you are using `pdfjs-dist@4.4.168` or a version compatible with your webpack setup.
 
 ### Fields Disappear on Resize
-- This is expected if viewport height changes dramatically
-- Refresh the page to reload the sample PDF
-- Fields are stored in state, so they will reappear if viewport stabilizes
-
-### Signature Not Saving
-- Click "Save" button after drawing signature
-- Check browser console for errors
-- Ensure signature pad canvas has proper dimensions
-
-### PDF Download Fails
-- Verify at least one field is placed on the PDF
-- Check browser console for fetch errors
-- Try a smaller PDF file to test
-
-### Responsiveness Issues
-- Use Chrome DevTools device emulation (F12 → Toggle device toolbar)
-- Verify field positions update when viewport changes
-- Check that viewport info is being updated (console logs should appear)
+- This is expected if viewport height changes dramatically.
+- Refresh the page to reload the sample PDF.
+- Fields are stored in state, so they will reappear if viewport stabilizes.
 
 ## 📊 Component Hierarchy
 
 ```
 Home (page.tsx)
 ├── FieldPalette
-├── PDFViewer (Dynamic)
-│   └── Iframe (Fallback) or
-│   └── ReactPDF.Document
-│       └── ReactPDF.Page
+├── CanvasPDFViewer (Dynamic)
+│   ├── Canvas Layer (PDF Render)
+│   └── Overlay Layer (Fields)
 └── FormFields (Array)
     └── FormField
         ├── Input/Canvas (for field type)
@@ -283,25 +244,22 @@ Home (page.tsx)
 
 ## 📈 Performance Optimizations
 
-- **Dynamic Import**: `PDFViewer` loads only on client to reduce bundle size
-- **useCallback**: Event handlers memoized to prevent unnecessary re-renders
-- **useEffect Cleanup**: Blob URLs revoked to free memory
-- **Lazy Scaling**: PDF scaling only recalculates on viewport changes
+- **Canvas Rendering**: Efficient rendering using `pdf.js` directly.
+- **Dynamic Import**: `CanvasPDFViewer` loads only on client.
+- **useCallback**: Event handlers memoized.
+- **useEffect Cleanup**: Blob URLs revoked.
 
 ## 🎓 Learning Resources
 
 - **PDF.js Docs**: https://mozilla.github.io/pdf.js/
-- **react-pdf Docs**: https://react-pdf.org/
 - **pdf-lib Docs**: https://pdfkit.org/
 - **Coordinate Systems**: https://en.wikipedia.org/wiki/Cartesian_coordinate_system
 
 ## 📝 Known Limitations
 
 1. **Single Page**: Currently only supports single-page PDFs
-2. **PDF Generation**: Uses `pdf-lib` (client-side) which has some limitations
+2. **PDF Generation**: Uses `pdf-lib` (client-side)
 3. **Custom Fonts**: PDF fonts are limited to standard fonts
-4. **Vector Graphics**: Complex vector shapes not supported in form fields
-5. **Multi-Page Support**: Would require UI redesign to select target pages
 
 ## 🚀 Future Enhancements
 
@@ -309,20 +267,13 @@ Home (page.tsx)
 - [ ] Custom field labels and validation rules
 - [ ] Field templates (e.g., "Legal Document Template")
 - [ ] Server-side PDF rendering for high performance
-- [ ] Cloud storage integration
-- [ ] Signature verification and timestamps
 - [ ] Real-time collaboration (WebSockets)
-- [ ] Advanced styling (colors, fonts, borders)
 
 ## 📞 Support
 
-For issues, questions, or contributions:
-1. Check the troubleshooting section above
-2. Review component source code (well-commented)
-3. Check browser console for detailed error messages
-4. Create an issue with reproduction steps
+For issues, questions, or contributions, check the troubleshooting section or review the component source code.
 
 ---
 
 **Last Updated**: December 9, 2025
-**Version**: 1.0.0 (MVP - Responsive Signature Injection Engine)
+**Version**: 1.1.0 (Canvas-based Rendering)

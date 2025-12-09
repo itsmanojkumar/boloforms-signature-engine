@@ -101,8 +101,40 @@ export default function Home() {
   }, []);
 
   const handleFieldSelect = useCallback((type: FieldType) => {
-    // Field will be placed via drag and drop
-  }, []);
+    if (!viewport) return;
+
+    // Default size
+    const defaultWidth = 150;
+    const defaultHeight = 30;
+
+    // Place in center of the PDF page (safe default)
+    // pdfWidth is in points. 
+    const pdfX = (viewport.pdfWidth / 2) - (defaultWidth / viewport.scale / 2);
+    const pdfY = (viewport.pdfHeight / 2) - (defaultHeight / viewport.scale / 2);
+
+    const cssPos = pdfToCss({ 
+        x: pdfX, 
+        y: pdfY, 
+        width: defaultWidth / viewport.scale, 
+        height: defaultHeight / viewport.scale 
+    }, viewport);
+
+    const newField: FormFieldState = {
+      id: `field-${Date.now()}`,
+      type,
+      x: pdfX,
+      y: pdfY,
+      width: defaultWidth / viewport.scale,
+      height: defaultHeight / viewport.scale,
+      cssX: cssPos.x,
+      cssY: cssPos.y,
+      cssWidth: cssPos.width,
+      cssHeight: cssPos.height,
+    };
+
+    setFields((prev) => [...prev, newField]);
+    setSelectedFieldId(newField.id);
+  }, [viewport]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent, overlayRect: DOMRect) => {
@@ -309,10 +341,10 @@ export default function Home() {
   }, [fields, pdfFile]);
 
   return (
-    <div className="flex h-screen bg-gray-50" style={{ height: "100vh", overflow: "hidden" }}>
+    <div className="flex flex-col md:flex-row h-screen bg-gray-50" style={{ height: "100vh", overflow: "hidden" }}>
       <FieldPalette onFieldSelect={handleFieldSelect} />
       <div className="flex-1 flex flex-col" style={{ minWidth: 0, overflow: "hidden" }}>
-        <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between flex-shrink-0">
+        <div className="bg-white border-b border-gray-200 p-4 flex flex-col md:flex-row items-center justify-between flex-shrink-0 gap-4 md:gap-0">
           <h1 className="text-xl font-bold text-gray-800">
             Signature Injection Engine
           </h1>

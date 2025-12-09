@@ -93,13 +93,16 @@ export async function injectFieldsToPDF(
         // Border width: 2pt (matches CSS border-2 = 2px)
         // Border is centered on rectangle edge, so half goes inside (1pt)
         const borderWidth = 2;
-        const borderInsideOffset = borderWidth / 2; // 1pt inside the rectangle
         
-        // Text positioning: Account for border inside offset
-        // CSS uses px-2 (8px) padding, at scale ~0.75 that's ~6pt
-        // But to match signature exactly, use minimal offset like signature
-        const textX = pdfX + borderInsideOffset; // 1pt from left edge (border inside)
-        const textY = pdfY + height / 2 - fontSize / 2; // Exact vertical center
+        // Text positioning: 
+        // In pdf-lib, drawText (x,y) is the bottom-left corner of the text baseline.
+        // But for multiline or standard text, we usually want to center it vertically in the box.
+        // height / 2 - fontSize / 2 centers the text body vertically.
+        // We add a small padding for the border.
+        const borderInsideOffset = 4; // Add padding so text doesn't touch border
+        
+        const textX = pdfX + borderInsideOffset; 
+        const textY = pdfY + height / 2 - fontSize / 2 + 1; // +1 adjustment for visual centering
         
         if (value) {
           page.drawText(value, {
@@ -130,10 +133,10 @@ export async function injectFieldsToPDF(
       case "date":
         // EXACT positioning: Match text field logic exactly
         const dateBorderWidth = 2;
-        const dateBorderInsideOffset = dateBorderWidth / 2; // 1pt inside
+        const dateBorderInsideOffset = 4; // Padding
         
-        const dateTextX = pdfX + dateBorderInsideOffset; // 1pt from left edge
-        const dateTextY = pdfY + height / 2 - fontSize / 2; // Exact vertical center
+        const dateTextX = pdfX + dateBorderInsideOffset; 
+        const dateTextY = pdfY + height / 2 - fontSize / 2 + 1; // +1 adjustment
         
         if (value) {
           page.drawText(value, {
