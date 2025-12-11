@@ -20,8 +20,10 @@ In Railway dashboard → Your service → Variables tab, add:
 
 ```
 MONGODB_URI=mongodb+srv://username:password@cluster0.xxxxx.mongodb.net/boloforms?retryWrites=true&w=majority
-FRONTEND_URL=https://your-vercel-app.vercel.app
+FRONTEND_URL=https://boloforms-signature-engine.vercel.app
 ```
+
+**Note**: The frontend URL is also hardcoded in `server/index.js` for immediate CORS support.
 
 **Note**: Railway automatically sets `PORT` - don't override it!
 

@@ -16,7 +16,8 @@ const PORT = process.env.PORT || 3001;
 // CORS: Allow requests from frontend (Vercel) and localhost for development
 const allowedOrigins = [
   'http://localhost:3000',
-  process.env.FRONTEND_URL, // Set in Railway: your Vercel URL
+  'https://boloforms-signature-engine.vercel.app', // Vercel production frontend
+  process.env.FRONTEND_URL, // Set in Railway: your Vercel URL (fallback)
 ].filter(Boolean); // Remove undefined values
 
 app.use(cors({
