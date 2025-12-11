@@ -59,11 +59,30 @@ const uploadsDir = path.join(__dirname, 'uploads', 'signed-pdfs');
 fs.mkdir(uploadsDir, { recursive: true }).catch(console.error);
 
 // MongoDB Connection
-const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URL || 'mongodb://localhost:27017/boloforms';
+// Support multiple MongoDB URI formats:
+// 1. MONGODB_URI (custom MongoDB Atlas or external)
+// 2. MONGO_URL (Railway MongoDB - automatically provided, recommended)
+// 3. Railway MongoDB with private domain (MONGO_INITDB_ROOT_USERNAME, etc.)
+let MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URL;
 
-if (!process.env.MONGODB_URI && !process.env.MONGO_URL) {
-  console.warn('⚠️  WARNING: MONGODB_URI not set! Using default localhost (will fail in production)');
+// If using Railway MongoDB with private domain variables
+if (!MONGODB_URI && process.env.MONGO_INITDB_ROOT_USERNAME && process.env.RAILWAY_PRIVATE_DOMAIN) {
+  const username = process.env.MONGO_INITDB_ROOT_USERNAME;
+  const password = process.env.MONGO_INITDB_ROOT_PASSWORD || '';
+  const domain = process.env.RAILWAY_PRIVATE_DOMAIN;
+  MONGODB_URI = `mongodb://${username}:${password}@${domain}:27017/boloforms?authSource=admin`;
+  console.log('[MongoDB] Using Railway private domain connection');
 }
+
+// Fallback to localhost for development
+if (!MONGODB_URI) {
+  MONGODB_URI = 'mongodb://localhost:27017/boloforms';
+  console.warn('⚠️  WARNING: MONGODB_URI/MONGO_URL not set! Using default localhost (will fail in production)');
+}
+
+// Log connection (hide credentials)
+const safeUri = MONGODB_URI.replace(/\/\/[^:]+:[^@]+@/, '//***:***@');
+console.log('[MongoDB] Connecting to:', safeUri);
 
 mongoose.connect(MONGODB_URI)
 .then(() => console.log('✅ MongoDB connected'))
