@@ -25,13 +25,18 @@ console.log('[CORS] NODE_ENV:', process.env.NODE_ENV);
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, Postman, etc.) in development
+    // Allow requests with no origin (mobile apps, Postman, health checks, etc.) in development
     if (!origin && process.env.NODE_ENV !== 'production') {
       return callback(null, true);
     }
     
     // In production, only allow specific origins
     if (process.env.NODE_ENV === 'production') {
+      // Allow requests with no origin for health checks and monitoring
+      if (!origin) {
+        return callback(null, true);
+      }
+      
       // Normalize origin (remove trailing slash)
       const normalizedOrigin = origin ? origin.replace(/\/$/, '') : null;
       const normalizedAllowed = allowedOrigins.map(o => o.replace(/\/$/, ''));

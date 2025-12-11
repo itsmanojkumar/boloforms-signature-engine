@@ -129,3 +129,6 @@ Once you check the Railway logs, share the error message and I can help fix it!
 
 The domain is correctly configured - we just need to fix the application error. 🚀
 
+
+
+
