@@ -17,6 +17,7 @@ import type { ViewportInfo } from "@/lib/coordinateConverter";
 import { cssToPdf, pdfToCss } from "@/lib/coordinateConverter";
 import { generateSamplePDF } from "@/lib/generateSamplePDF";
 import { injectFieldsToPDF } from "@/lib/injectFieldsToPDF";
+import { signPdf, checkHealth } from "@/lib/signPdfAPI";
 
 export default function Home() {
   const [fields, setFields] = useState<FormFieldState[]>([]);
@@ -27,8 +28,24 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [showReferenceOverlay, setShowReferenceOverlay] = useState(false);
+  const [isSigning, setIsSigning] = useState(false);
+  const [signedPdfUrl, setSignedPdfUrl] = useState<string | null>(null);
+  const [backendStatus, setBackendStatus] = useState<"checking" | "online" | "offline">("checking");
   const pdfContainerRef = useRef<HTMLDivElement>(null);
   const pdfBlobUrlRef = useRef<string | null>(null);
+
+  // Check backend health on mount
+  useEffect(() => {
+    const checkBackend = async () => {
+      setBackendStatus("checking");
+      const isHealthy = await checkHealth();
+      setBackendStatus(isHealthy ? "online" : "offline");
+    };
+    checkBackend();
+    // Check every 30 seconds
+    const interval = setInterval(checkBackend, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Generate sample PDF on mount
   useEffect(() => {
@@ -350,6 +367,72 @@ export default function Home() {
     }
   }, [fields, pdfFile]);
 
+  const handleSignPDF = useCallback(async () => {
+    if (!pdfFile || fields.length === 0) {
+      alert(pdfFile ? "No fields to sign" : "PDF not loaded");
+      return;
+    }
+
+    if (backendStatus !== "online") {
+      alert("Backend server is offline. Please start the backend server first.\n\nRun: cd server && npm install && npm start");
+      return;
+    }
+
+    try {
+      setIsSigning(true);
+      setError(null);
+
+      // Get original PDF bytes
+      const response = await fetch(pdfFile);
+      const arrayBuffer = await response.arrayBuffer();
+      const pdfBytes = new Uint8Array(arrayBuffer);
+
+      // Generate unique PDF ID
+      const pdfId = `pdf-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      // Prepare all fields for backend (convert FormFieldState to FormField format)
+      const fieldsToSend = fields.map((field) => ({
+        id: field.id,
+        type: field.type,
+        x: field.x,
+        y: field.y,
+        width: field.width,
+        height: field.height,
+        value: field.value,
+        label: field.label,
+        options: field.options,
+        imageData: field.imageData,
+        signatureData: field.signatureData,
+      }));
+
+      console.log('[Sign PDF] Preparing to sign:', {
+        pdfId,
+        fieldsCount: fieldsToSend.length,
+        fieldTypes: fieldsToSend.map(f => f.type),
+        hasPdfBytes: !!pdfBytes,
+      });
+
+      // Sign PDF with all fields
+      const result = await signPdf(pdfId, fieldsToSend, pdfBytes);
+
+      console.log("✅ PDF signed successfully:", result);
+      setSignedPdfUrl(result.signedPdfUrl);
+      
+      // Open signed PDF in new tab
+      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "https://profound-charisma.up.railway.app";
+      window.open(`${apiBaseUrl}${result.signedPdfUrl}`, "_blank");
+      
+      alert(`PDF signed successfully!\n\nAudit Trail:\nOriginal Hash: ${result.auditTrail.originalHash.substring(0, 16)}...\nSigned Hash: ${result.auditTrail.signedHash.substring(0, 16)}...`);
+    } catch (err) {
+      console.error("Error signing PDF:", err);
+      const errorMessage = err instanceof Error ? err.message : "Failed to sign PDF";
+      setError(errorMessage);
+      alert(`Error signing PDF: ${errorMessage}`);
+    } finally {
+      setIsSigning(false);
+    }
+  }, [fields, pdfFile, backendStatus]);
+
   return (
     <div className="flex flex-col md:flex-row h-screen bg-gray-50" style={{ height: "100vh", overflow: "hidden" }}>
       <FieldPalette onFieldSelect={handleFieldSelect} />
@@ -358,7 +441,17 @@ export default function Home() {
           <h1 className="text-xl font-bold text-gray-800">
             Signature Injection Engine
           </h1>
-          <div className="flex gap-2">
+          <div className="flex flex-col md:flex-row gap-2 items-center">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${
+                backendStatus === "online" ? "bg-green-500" : 
+                backendStatus === "offline" ? "bg-red-500" : 
+                "bg-yellow-500"
+              }`} title={backendStatus === "online" ? "Backend Online" : backendStatus === "offline" ? "Backend Offline" : "Checking..."} />
+              <span className="text-xs text-gray-600 hidden md:inline">
+                {backendStatus === "online" ? "Backend Online" : backendStatus === "offline" ? "Backend Offline" : "Checking..."}
+              </span>
+            </div>
             <button
               onClick={() => setShowReferenceOverlay(!showReferenceOverlay)}
               className={`px-4 py-2 rounded ${
@@ -368,6 +461,18 @@ export default function Home() {
               }`}
             >
               {showReferenceOverlay ? "Hide" : "Show"} Reference Points
+            </button>
+            <button
+              onClick={handleSignPDF}
+              disabled={isSigning || backendStatus !== "online"}
+              className={`px-4 py-2 rounded ${
+                backendStatus === "online" && !isSigning
+                  ? "bg-green-600 text-white hover:bg-green-700"
+                  : "bg-gray-400 text-gray-200 cursor-not-allowed"
+              }`}
+              title={backendStatus !== "online" ? "Backend server is offline" : "Sign PDF via Backend API"}
+            >
+              {isSigning ? "Signing..." : "Sign PDF"}
             </button>
             <button
               onClick={handleDownloadPDF}

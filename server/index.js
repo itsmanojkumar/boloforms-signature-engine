@@ -6,13 +6,40 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const crypto = require('crypto');
+const { injectFieldsToPDF } = require('./injectFields');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors());
+// CORS: Allow requests from frontend (Vercel) and localhost for development
+const allowedOrigins = [
+  'http://localhost:3000',
+  process.env.FRONTEND_URL, // Set in Railway: your Vercel URL
+].filter(Boolean); // Remove undefined values
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, Postman, etc.) in development
+    if (!origin && process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    
+    // In production, only allow specific origins
+    if (process.env.NODE_ENV === 'production') {
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    } else {
+      // Development: allow all origins
+      callback(null, true);
+    }
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -53,36 +80,109 @@ function calculateSHA256(buffer) {
 
 /**
  * POST /sign-pdf
- * Signs a PDF with a signature image at specified coordinates
+ * Signs a PDF with all form fields (text, date, signature, image, radio)
  * 
  * Body:
  * - pdfId: string (unique identifier for the PDF)
- * - signatureImage: string (Base64 encoded image)
- * - coordinates: { x: number, y: number, width: number, height: number } (in PDF points)
- * - pdfBytes?: Uint8Array (optional: PDF file as base64 or buffer)
+ * - fields: Array of field objects (required) OR legacy: signatureImage + coordinates
+ * - pdfBytes?: string (Base64 encoded PDF bytes, optional)
+ * 
+ * Field object structure:
+ * {
+ *   id: string,
+ *   type: "text" | "date" | "signature" | "image" | "radio",
+ *   x: number (PDF points from left),
+ *   y: number (PDF points from bottom),
+ *   width: number (PDF points),
+ *   height: number (PDF points),
+ *   value?: string,
+ *   label?: string,
+ *   signatureData?: string (Base64 data URL),
+ *   imageData?: string (Base64 data URL)
+ * }
  */
 app.post('/sign-pdf', async (req, res) => {
   try {
-    const { pdfId, signatureImage, coordinates, pdfBytes } = req.body;
+    const { pdfId, fields, signatureImage, coordinates, pdfBytes } = req.body;
+
+    // Debug: Log what we received
+    console.log('[Sign PDF] Request received:', {
+      hasPdfId: !!pdfId,
+      hasFields: !!fields,
+      fieldsLength: fields?.length,
+      hasSignatureImage: !!signatureImage,
+      hasCoordinates: !!coordinates,
+      hasPdfBytes: !!pdfBytes,
+    });
 
     // Validation
-    if (!pdfId || !signatureImage || !coordinates) {
+    if (!pdfId) {
       return res.status(400).json({
-        error: 'Missing required fields: pdfId, signatureImage, coordinates'
+        error: 'Missing required field: pdfId'
       });
     }
 
-    if (!coordinates.x || !coordinates.y || !coordinates.width || !coordinates.height) {
+    // Support both new format (fields array) and legacy format (signatureImage + coordinates)
+    let fieldsToInject = [];
+    
+    // Check for new format first (fields array)
+    if (fields !== undefined && fields !== null) {
+      if (Array.isArray(fields)) {
+        if (fields.length > 0) {
+          // New format: fields array
+          fieldsToInject = fields;
+          console.log(`[Sign PDF] Processing PDF ID: ${pdfId} with ${fields.length} fields`);
+          console.log(`[Sign PDF] Field types:`, fields.map(f => f.type));
+        } else {
+          return res.status(400).json({
+            error: 'Fields array is empty. Please add at least one field before signing.',
+            received: { pdfId, fieldsLength: 0 }
+          });
+        }
+      } else {
+        return res.status(400).json({
+          error: 'Invalid "fields" parameter. Expected an array.',
+          received: { pdfId, fieldsType: typeof fields, fields }
+        });
+      }
+    } else if (signatureImage && coordinates) {
+      // Legacy format: single signature
+      if (!coordinates.x || !coordinates.y || !coordinates.width || !coordinates.height) {
+        return res.status(400).json({
+          error: 'Invalid coordinates. Must include: x, y, width, height'
+        });
+      }
+      fieldsToInject = [{
+        id: 'signature-1',
+        type: 'signature',
+        x: coordinates.x,
+        y: coordinates.y,
+        width: coordinates.width,
+        height: coordinates.height,
+        signatureData: signatureImage,
+      }];
+      console.log(`[Sign PDF] Processing PDF ID: ${pdfId} with legacy signature format`);
+    } else {
+      // More detailed error message
+      const missingFields = [];
+      if (!pdfId) missingFields.push('pdfId');
+      if (!fields && !signatureImage) missingFields.push('fields (or signatureImage)');
+      if (!fields && signatureImage && !coordinates) missingFields.push('coordinates');
+      
       return res.status(400).json({
-        error: 'Invalid coordinates. Must include: x, y, width, height'
+        error: `Missing required fields: ${missingFields.join(', ')}. Please provide either "fields" array or "signatureImage" + "coordinates"`,
+        received: {
+          hasPdfId: !!pdfId,
+          hasFields: !!fields,
+          fieldsIsArray: Array.isArray(fields),
+          fieldsLength: fields?.length,
+          hasSignatureImage: !!signatureImage,
+          hasCoordinates: !!coordinates,
+        }
       });
     }
-
-    console.log(`[Sign PDF] Processing PDF ID: ${pdfId}`);
-    console.log(`[Sign PDF] Coordinates:`, coordinates);
 
     // Load PDF and calculate original hash
-    let pdfDoc;
     let originalPdfBuffer;
     let originalHash;
 
@@ -91,7 +191,6 @@ app.post('/sign-pdf', async (req, res) => {
       originalPdfBuffer = Buffer.from(pdfBytes, 'base64');
       originalHash = calculateSHA256(originalPdfBuffer);
       console.log(`[Sign PDF] Original PDF Hash (SHA-256): ${originalHash}`);
-      pdfDoc = await PDFDocument.load(originalPdfBuffer);
     } else {
       // Otherwise, try to load from stored PDF
       const storedPdf = await PdfModel.findOne({ pdfId });
@@ -103,82 +202,14 @@ app.post('/sign-pdf', async (req, res) => {
       originalPdfBuffer = await fs.readFile(storedPdf.originalPdfPath);
       originalHash = calculateSHA256(originalPdfBuffer);
       console.log(`[Sign PDF] Original PDF Hash (SHA-256): ${originalHash}`);
-      pdfDoc = await PDFDocument.load(originalPdfBuffer);
     }
 
-    const pages = pdfDoc.getPages();
-    const page = pages[0]; // Assuming first page for now
+    // Convert Buffer to Uint8Array for injectFieldsToPDF
+    const pdfBytesUint8 = new Uint8Array(originalPdfBuffer);
 
-    // Process signature image
-    let signatureImageBytes;
-    if (signatureImage.startsWith('data:image')) {
-      // Extract base64 data
-      const base64Data = signatureImage.split(',')[1];
-      signatureImageBytes = Buffer.from(base64Data, 'base64');
-    } else {
-      signatureImageBytes = Buffer.from(signatureImage, 'base64');
-    }
-
-    // Embed image
-    let embeddedImage;
-    try {
-      embeddedImage = await pdfDoc.embedPng(signatureImageBytes);
-    } catch (pngError) {
-      try {
-        embeddedImage = await pdfDoc.embedJpg(signatureImageBytes);
-      } catch (jpgError) {
-        return res.status(400).json({
-          error: 'Invalid image format. Must be PNG or JPEG.',
-          details: jpgError.message
-        });
-      }
-    }
-
-    // Get image dimensions
-    const imageDims = embeddedImage.scale(1);
-    const imageAspectRatio = imageDims.width / imageDims.height;
-    
-    // Get target box dimensions
-    const boxWidth = coordinates.width;
-    const boxHeight = coordinates.height;
-    const boxAspectRatio = boxWidth / boxHeight;
-
-    // Calculate dimensions to fit within box while maintaining aspect ratio
-    let finalWidth, finalHeight;
-    if (imageAspectRatio > boxAspectRatio) {
-      // Image is wider - fit to width
-      finalWidth = boxWidth;
-      finalHeight = boxWidth / imageAspectRatio;
-    } else {
-      // Image is taller - fit to height
-      finalHeight = boxHeight;
-      finalWidth = boxHeight * imageAspectRatio;
-    }
-
-    // Center the image within the box
-    const xOffset = (boxWidth - finalWidth) / 2;
-    const yOffset = (boxHeight - finalHeight) / 2;
-
-    // PDF coordinates: y is from bottom, so we need to invert
-    const pageHeight = page.getHeight();
-    const pdfX = coordinates.x + xOffset;
-    const pdfY = pageHeight - (coordinates.y + coordinates.height) + yOffset;
-
-    console.log(`[Sign PDF] Image dimensions: ${imageDims.width}x${imageDims.height}`);
-    console.log(`[Sign PDF] Box dimensions: ${boxWidth}x${boxHeight}`);
-    console.log(`[Sign PDF] Final dimensions: ${finalWidth}x${finalHeight}`);
-    console.log(`[Sign PDF] Position: (${pdfX}, ${pdfY})`);
-
-    // Draw signature image
-    page.drawImage(embeddedImage, {
-      x: pdfX,
-      y: pdfY,
-      width: finalWidth,
-      height: finalHeight,
-    });
-
-    // Save signed PDF
-    const signedPdfBytes = await pdfDoc.save();
+    // Inject all fields into PDF
+    console.log(`[Sign PDF] Injecting ${fieldsToInject.length} fields into PDF...`);
+    const signedPdfBytes = await injectFieldsToPDF(pdfBytesUint8, fieldsToInject);
     const signedPdfBuffer = Buffer.from(signedPdfBytes);
     
     // Calculate hash of signed PDF
@@ -315,8 +346,10 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Backend server running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Backend server running on port ${PORT}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔗 MongoDB: ${MONGODB_URI ? 'Configured' : 'Not configured'}`);
 });
 

@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# server uploads
+/server/uploads/signed-pdfs/*
+!/server/uploads/signed-pdfs/.gitkeep
+/server/node_modules

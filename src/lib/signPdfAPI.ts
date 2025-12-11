@@ -2,12 +2,28 @@
  * Backend API Client for PDF Signing
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+// Backend API URL - defaults to Railway production URL
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://profound-charisma.up.railway.app';
+
+export interface FormField {
+  id: string;
+  type: "text" | "date" | "signature" | "image" | "radio";
+  x: number; // PDF points from left
+  y: number; // PDF points from bottom
+  width: number; // PDF points
+  height: number; // PDF points
+  value?: string;
+  label?: string;
+  options?: string[];
+  imageData?: string; // Base64 data URL
+  signatureData?: string; // Base64 data URL
+}
 
 export interface SignPdfRequest {
   pdfId: string;
-  signatureImage: string; // Base64 data URL
-  coordinates: {
+  fields?: FormField[]; // New format: array of all fields
+  signatureImage?: string; // Legacy format: Base64 data URL
+  coordinates?: {
     x: number;
     y: number;
     width: number;
@@ -39,18 +55,16 @@ export interface VerifyPdfResponse {
 }
 
 /**
- * Sign a PDF with a signature image
+ * Sign a PDF with all form fields
  * 
  * @param pdfId - Unique identifier for the PDF
- * @param signatureImage - Base64 encoded signature image (data URL)
- * @param coordinates - PDF coordinates in points (bottom-left origin)
+ * @param fields - Array of all form fields to inject (text, date, signature, image, radio)
  * @param pdfBytes - Optional: PDF file as Uint8Array (will be converted to base64)
  * @returns Signed PDF URL
  */
 export async function signPdf(
   pdfId: string,
-  signatureImage: string,
-  coordinates: { x: number; y: number; width: number; height: number },
+  fields: FormField[],
   pdfBytes?: Uint8Array
 ): Promise<SignPdfResponse> {
   try {
@@ -63,17 +77,25 @@ export async function signPdf(
       pdfBytesBase64 = btoa(binary);
     }
 
+    const requestBody = {
+      pdfId,
+      fields,
+      pdfBytes: pdfBytesBase64,
+    };
+
+    console.log('[Sign PDF API] Sending request:', {
+      pdfId,
+      fieldsCount: fields?.length,
+      fieldTypes: fields?.map(f => f.type),
+      hasPdfBytes: !!pdfBytesBase64,
+    });
+
     const response = await fetch(`${API_BASE_URL}/sign-pdf`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        pdfId,
-        signatureImage,
-        coordinates,
-        pdfBytes: pdfBytesBase64,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
