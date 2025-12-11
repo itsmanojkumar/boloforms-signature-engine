@@ -419,7 +419,7 @@ export default function Home() {
       setSignedPdfUrl(result.signedPdfUrl);
       
       // Open signed PDF in new tab
-      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "https://profound-charisma.up.railway.app";
+      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "https://profound-charisma-production.up.railway.app";
       window.open(`${apiBaseUrl}${result.signedPdfUrl}`, "_blank");
       
       alert(`PDF signed successfully!\n\nAudit Trail:\nOriginal Hash: ${result.auditTrail.originalHash.substring(0, 16)}...\nSigned Hash: ${result.auditTrail.signedHash.substring(0, 16)}...`);

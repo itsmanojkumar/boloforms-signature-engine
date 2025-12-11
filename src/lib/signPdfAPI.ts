@@ -3,7 +3,7 @@
  */
 
 // Backend API URL - defaults to Railway production URL
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://profound-charisma.up.railway.app';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://profound-charisma-production.up.railway.app';
 
 export interface FormField {
   id: string;
