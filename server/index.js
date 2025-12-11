@@ -20,6 +20,9 @@ const allowedOrigins = [
   process.env.FRONTEND_URL, // Set in Railway: your Vercel URL (fallback)
 ].filter(Boolean); // Remove undefined values
 
+console.log('[CORS] Allowed origins:', allowedOrigins);
+console.log('[CORS] NODE_ENV:', process.env.NODE_ENV);
+
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (mobile apps, Postman, etc.) in development
@@ -29,9 +32,16 @@ app.use(cors({
     
     // In production, only allow specific origins
     if (process.env.NODE_ENV === 'production') {
-      if (allowedOrigins.includes(origin)) {
+      // Normalize origin (remove trailing slash)
+      const normalizedOrigin = origin ? origin.replace(/\/$/, '') : null;
+      const normalizedAllowed = allowedOrigins.map(o => o.replace(/\/$/, ''));
+      
+      if (normalizedOrigin && normalizedAllowed.includes(normalizedOrigin)) {
         callback(null, true);
       } else {
+        // Log for debugging
+        console.log(`[CORS] Blocked origin: ${origin} (normalized: ${normalizedOrigin})`);
+        console.log(`[CORS] Allowed origins:`, normalizedAllowed);
         callback(new Error('Not allowed by CORS'));
       }
     } else {
@@ -49,11 +59,13 @@ const uploadsDir = path.join(__dirname, 'uploads', 'signed-pdfs');
 fs.mkdir(uploadsDir, { recursive: true }).catch(console.error);
 
 // MongoDB Connection
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/boloforms';
-mongoose.connect(MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URL || 'mongodb://localhost:27017/boloforms';
+
+if (!process.env.MONGODB_URI && !process.env.MONGO_URL) {
+  console.warn('⚠️  WARNING: MONGODB_URI not set! Using default localhost (will fail in production)');
+}
+
+mongoose.connect(MONGODB_URI)
 .then(() => console.log('✅ MongoDB connected'))
 .catch(err => console.error('❌ MongoDB connection error:', err));
 
